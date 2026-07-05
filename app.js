@@ -1133,28 +1133,61 @@ async function startRecordingFlow() {
 
   if (useWebCodecs) {
     try {
-      mp4Muxer = new Mp4Muxer.Muxer({
-        target: new Mp4Muxer.ArrayBufferTarget(),
-        video: {
-          codec: 'avc',
+      // WebCodecs configuration verification
+      const candidateCodecs = [
+        'avc1.4d401f', // H.264 Main Profile, Level 3.1
+        'avc1.42e01f', // H.264 Baseline Profile, Level 3.1
+        'avc1.64001f'  // H.264 High Profile, Level 3.1
+      ];
+
+      let selectedCodec = candidateCodecs[0];
+      
+      // Async helper to find best supported codec
+      async function configureEncoder() {
+        for (const codec of candidateCodecs) {
+          try {
+            const support = await VideoEncoder.isConfigSupported({
+              codec: codec,
+              width: width,
+              height: height,
+              bitrate: 5_000_000,
+              framerate: fps
+            });
+            if (support.supported) {
+              selectedCodec = codec;
+              break;
+            }
+          } catch (e) {
+            // ignore and try next
+          }
+        }
+
+        mp4Muxer = new Mp4Muxer.Muxer({
+          target: new Mp4Muxer.ArrayBufferTarget(),
+          video: {
+            codec: selectedCodec.startsWith('avc1') ? 'avc' : 'avc',
+            width: width,
+            height: height
+          },
+          fastStart: 'in-memory'
+        });
+
+        videoEncoder = new VideoEncoder({
+          output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+          error: e => console.error("WebCodecs Encoder Error:", e)
+        });
+
+        videoEncoder.configure({
+          codec: selectedCodec,
           width: width,
-          height: height
-        },
-        fastStart: 'in-memory'
-      });
+          height: height,
+          bitrate: 5_000_000,
+          framerate: fps,
+          avc: { format: 'annexb' } // Annex B format for broad compatibility
+        });
+      }
 
-      videoEncoder = new VideoEncoder({
-        output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
-        error: e => console.error("WebCodecs Encoder Error:", e)
-      });
-
-      videoEncoder.configure({
-        codec: 'avc1.64001f', // H.264 profile
-        width: width,
-        height: height,
-        bitrate: 5_000_000,
-        framerate: fps
-      });
+      await configureEncoder();
     } catch (err) {
       console.error("WebCodecs initialization failed, falling back to MediaRecorder:", err);
       setupMediaRecorderFallback();
