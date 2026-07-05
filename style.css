@@ -690,7 +690,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .elevation-stats {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
@@ -703,6 +704,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .stat-item .highlight {
   color: var(--accent-cyan);
   text-shadow: 0 0 5px var(--accent-cyan-glow);
+}
+
+.stat-item .highlight-green {
+  color: #39ff14;
+  text-shadow: 0 0 5px rgba(57, 255, 20, 0.4);
 }
 
 .chart-container {

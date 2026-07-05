@@ -2,7 +2,8 @@
 let map = null;
 let gpxData = {
   points: [],      // Array of {lat, lon, ele, time, dist}
-  totalDistance: 0 // in meters
+  totalDistance: 0, // in meters
+  totalAscent: 0   // cumulative elevation gain in meters
 };
 let isPlaying = false;
 let isRecording = false;
@@ -44,6 +45,9 @@ const elevationPanel = document.getElementById('elevation-panel');
 const maxEleSpan = document.getElementById('max-ele');
 const minEleSpan = document.getElementById('min-ele');
 const currentEleSpan = document.getElementById('current-ele');
+const totalAscentSpan = document.getElementById('total-ascent');
+const currentDistSpan = document.getElementById('current-dist');
+const totalDistSpan = document.getElementById('total-dist');
 const elevationChart = document.getElementById('elevation-chart');
 
 // Map Styles mapping
@@ -330,6 +334,7 @@ function parseGPX(gpxText, filename) {
 
     const points = [];
     let accumulatedDist = 0;
+    let totalAscent = 0;
     let minEle = Infinity;
     let maxEle = -Infinity;
 
@@ -352,6 +357,9 @@ function parseGPX(gpxText, filename) {
       if (i > 0) {
         const prevPt = points[points.length - 1];
         accumulatedDist += haversineDistance(prevPt.lat, prevPt.lon, lat, lon);
+        // 누적 상승 계산 (이전 포인트보다 고도가 높아진 경우만)
+        const eleGain = ele - prevPt.ele;
+        if (eleGain > 0) totalAscent += eleGain;
       }
 
       points.push({ lat, lon, ele, time, dist: accumulatedDist });
@@ -364,6 +372,7 @@ function parseGPX(gpxText, filename) {
 
     gpxData.points = points;
     gpxData.totalDistance = accumulatedDist;
+    gpxData.totalAscent = totalAscent;
 
     // Show File Meta Info
     infoFilename.textContent = filename;
@@ -374,6 +383,9 @@ function parseGPX(gpxText, filename) {
     maxEleSpan.textContent = Math.round(maxEle);
     minEleSpan.textContent = Math.round(minEle);
     currentEleSpan.textContent = Math.round(points[0].ele);
+    totalAscentSpan.textContent = Math.round(totalAscent);
+    totalDistSpan.textContent = (accumulatedDist / 1000).toFixed(2);
+    currentDistSpan.textContent = '0.00';
     
     // Toggle UI State
     dropZone.classList.add('hidden');
@@ -652,8 +664,28 @@ function drawElevationChart(progress) {
   ctx.fillStyle = '#ffffff';
   ctx.fill();
   
-  // Update stats UI
+  // Update stats UI: 현재 고도, 현재 누적상승, 현재 거리
   currentEleSpan.textContent = Math.round(curPt.ele);
+
+  // 현재 진행 거리 기준 누적상승 계산 (progress 기반 정확한 계산)
+  // points는 함수 상단의 const points = gpxData.points 재사용
+  const targetDist = progress * gpxData.totalDistance;
+  let ascent = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].dist > targetDist) {
+      // 마지막 구간 일부 반영 (비례 보간)
+      const segGain = points[i].ele - points[i - 1].ele;
+      if (segGain > 0) {
+        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
+        ascent += segGain * ratio;
+      }
+      break;
+    }
+    const gain = points[i].ele - points[i - 1].ele;
+    if (gain > 0) ascent += gain;
+  }
+  totalAscentSpan.textContent = Math.round(ascent);
+  currentDistSpan.textContent = (targetDist / 1000).toFixed(2);
 }
 
 // ---------------- ANIMATION & PREVIEW LOGIC ----------------
@@ -881,13 +913,32 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   ctx.font = 'bold 12px sans-serif';
   ctx.fillText('고도 프로필', chartX + 15, chartY + 22);
 
+  // 현재 progress 기준 누적상승 계산
+  const targetDist = progress * gpxData.totalDistance;
+  let ascent = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].dist > targetDist) {
+      const segGain = points[i].ele - points[i - 1].ele;
+      if (segGain > 0) {
+        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
+        ascent += segGain * ratio;
+      }
+      break;
+    }
+    const gain = points[i].ele - points[i - 1].ele;
+    if (gain > 0) ascent += gain;
+  }
+  const currentDistKm = (targetDist / 1000).toFixed(2);
+  const totalDistKm = (gpxData.totalDistance / 1000).toFixed(2);
+
   ctx.font = '11px sans-serif';
-  ctx.fillText(`최저: ${Math.round(minEle)}m`, chartX + chartW - 220, chartY + 22);
-  ctx.fillText(`최대: ${Math.round(maxEle)}m`, chartX + chartW - 140, chartY + 22);
-  
+  ctx.fillText(`최저: ${Math.round(minEle)}m`, chartX + chartW - 310, chartY + 22);
+  ctx.fillText(`최대: ${Math.round(maxEle)}m`, chartX + chartW - 230, chartY + 22);
+  ctx.fillText(`거리: ${currentDistKm}/${totalDistKm}km`, chartX + chartW - 150, chartY + 22);
+
   ctx.fillStyle = activeColor;
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText(`현재: ${Math.round(curPt.ele)}m`, chartX + chartW - 70, chartY + 22);
+  ctx.fillText(`현재: ${Math.round(curPt.ele)}m  ↑${Math.round(ascent)}m`, chartX + chartW - 160, chartY + 22);
 
   // Chart line bounding box (leave room for header)
   const graphX = chartX + 15;
