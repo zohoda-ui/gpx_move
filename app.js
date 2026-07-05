@@ -1025,7 +1025,10 @@ async function startRecordingFlow() {
   recordBtn.disabled = true;
   
   const durationSec = parseInt(durationInput.value, 10);
-  const [width, height] = resolutionSelect.value.split('x').map(num => parseInt(num, 10));
+  const [rawWidth, rawHeight] = resolutionSelect.value.split('x').map(num => parseInt(num, 10));
+  // H.264 하드웨어 가속 인코딩 호환성을 위해 가로, 세로 해상도를 16의 배수로 강제 올림 조정
+  const width = Math.ceil(rawWidth / 16) * 16;
+  const height = Math.ceil(rawHeight / 16) * 16;
   const cameraMode = document.querySelector('input[name="camera-mode"]:checked').value;
   
   renderingOverlay.classList.remove('hidden');
@@ -1131,6 +1134,8 @@ async function startRecordingFlow() {
     mediaRecorder.start();
   }
 
+  let actualUseWebCodecs = useWebCodecs;
+
   if (useWebCodecs) {
     try {
       // WebCodecs configuration verification
@@ -1140,7 +1145,7 @@ async function startRecordingFlow() {
         'avc1.64001f'  // H.264 High Profile, Level 3.1
       ];
 
-      let selectedCodec = candidateCodecs[0];
+      let selectedCodec = null;
       
       // Async helper to find best supported codec
       async function configureEncoder() {
@@ -1162,10 +1167,14 @@ async function startRecordingFlow() {
           }
         }
 
+        if (!selectedCodec) {
+          throw new Error("브라우저에서 지원하는 적절한 H.264 비디오 코덱을 찾을 수 없습니다.");
+        }
+
         mp4Muxer = new Mp4Muxer.Muxer({
           target: new Mp4Muxer.ArrayBufferTarget(),
           video: {
-            codec: selectedCodec.startsWith('avc1') ? 'avc' : 'avc',
+            codec: 'avc',
             width: width,
             height: height
           },
@@ -1173,8 +1182,15 @@ async function startRecordingFlow() {
         });
 
         videoEncoder = new VideoEncoder({
-          output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
-          error: e => console.error("WebCodecs Encoder Error:", e)
+          output: (chunk, meta) => {
+            if (mp4Muxer) mp4Muxer.addVideoChunk(chunk, meta);
+          },
+          error: e => {
+            console.error("WebCodecs Encoder Error:", e);
+            alert(`비디오 인코딩 중 에러가 발생했습니다: ${e.message || e}`);
+            abortRecording = true;
+            stopRecordingFlowCleanUp();
+          }
         });
 
         videoEncoder.configure({
@@ -1182,21 +1198,21 @@ async function startRecordingFlow() {
           width: width,
           height: height,
           bitrate: 5_000_000,
-          framerate: fps,
-          avc: { format: 'annexb' } // Annex B format for broad compatibility
+          framerate: fps
         });
       }
 
       await configureEncoder();
     } catch (err) {
       console.error("WebCodecs initialization failed, falling back to MediaRecorder:", err);
+      actualUseWebCodecs = false;
       setupMediaRecorderFallback();
     }
   } else {
     setupMediaRecorderFallback();
   }
 
-  runDeterministicRecordingLoop(durationSec, cameraMode, width, height, fps, useWebCodecs);
+  runDeterministicRecordingLoop(durationSec, cameraMode, width, height, fps, actualUseWebCodecs);
 }
 
 async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH, fps, useWebCodecs) {
@@ -1255,11 +1271,15 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
 
     currentFrame++;
     
-    // Control queue size to prevent browser freeze
-    if (useWebCodecs && videoEncoder && videoEncoder.encodeQueueSize > 15) {
-      await new Promise(r => setTimeout(r, 30));
+    // Control queue size to prevent browser freeze and optimize speed
+    if (useWebCodecs && videoEncoder) {
+      if (videoEncoder.encodeQueueSize > 12) {
+        await new Promise(r => setTimeout(r, 15)); // 큐가 쌓였을 때만 적절히 대기
+      } else {
+        await new Promise(r => setTimeout(r, 1));  // 큐가 여유 있을 때는 초고속 루프 진행
+      }
     } else {
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 2));   // MediaRecorder 폴백 모드 시 대기 최소화
     }
   }
 
@@ -1307,9 +1327,19 @@ function waitForMapStyleAndTiles() {
       resolve();
       return;
     }
-    map.once('idle', () => {
-      resolve();
-    });
+    
+    let isResolved = false;
+    const done = () => {
+      if (!isResolved) {
+        isResolved = true;
+        resolve();
+      }
+    };
+
+    map.once('idle', done);
+    
+    // 최대 12ms만 기다리고 강제로 프레임 캡처 진행 (속도 추가 향상 및 화면 품질 벨런스 확보)
+    setTimeout(done, 12);
   });
 }
 
