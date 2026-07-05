@@ -728,9 +728,15 @@ function togglePreview() {
     const targetPitch = (cameraMode === 'chase-rot' || cameraMode === 'chase-fixed') ? 55 : 0;
     const targetBearing = cameraMode === 'chase-rot' ? initialBearing : 0;
     
+    const canvas = map.getCanvas();
+    const isVertical = canvas.height > canvas.width;
+    const targetZoom = (cameraMode === 'chase-rot' || cameraMode === 'chase-fixed') 
+      ? (isVertical ? 13.5 : 14.5) 
+      : (isVertical ? 11.5 : 13);
+    
     map.jumpTo({
       center: [startPt.lon, startPt.lat],
-      zoom: (cameraMode === 'chase-rot' || cameraMode === 'chase-fixed') ? 14.5 : 13,
+      zoom: targetZoom,
       pitch: targetPitch,
       bearing: targetBearing
     });
@@ -810,6 +816,9 @@ function updateSimulationFrame(progress, cameraMode) {
   // Draw local UI elevation chart
   drawElevationChart(progress);
 
+  const canvas = map.getCanvas();
+  const isVertical = canvas.height > canvas.width;
+
   // Map camera dynamics
   if (cameraMode === 'chase-rot') {
     // 3D Chase mode WITH ROTATION DAMPING (anti-shake)
@@ -827,7 +836,7 @@ function updateSimulationFrame(progress, cameraMode) {
       center: [currentPt.lon, currentPt.lat],
       bearing: lastBearing,
       pitch: 55,
-      zoom: 14.5
+      zoom: isVertical ? 13.5 : 14.5
     });
   } else if (cameraMode === 'chase-fixed') {
     // 3D Chase mode WITH NO CAMERA ROTATION (North fixed, 3D tilt)
@@ -835,7 +844,7 @@ function updateSimulationFrame(progress, cameraMode) {
       center: [currentPt.lon, currentPt.lat],
       bearing: 0,
       pitch: 55,
-      zoom: 14.5
+      zoom: isVertical ? 13.5 : 14.5
     });
   } else {
     // 2D Overview mode
@@ -843,7 +852,7 @@ function updateSimulationFrame(progress, cameraMode) {
       center: [currentPt.lon, currentPt.lat],
       bearing: 0,
       pitch: 0,
-      zoom: 13
+      zoom: isVertical ? 11.5 : 13
     });
   }
 }
@@ -865,12 +874,15 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   const points = gpxData.points;
   if (points.length < 2) return;
 
+  const isVertical = mapH > mapW;
+
   // Chart size and coordinates on the output video
   // Responsive based on video height/width
-  const chartW = mapW * 0.9;
-  const chartH = Math.min(120, mapH * 0.12);
-  const chartX = mapW * 0.05;
-  const chartY = mapH - chartH - 30; // 30px offset from bottom
+  const chartW = isVertical ? mapW * 0.82 : mapW * 0.9;
+  const chartH = isVertical ? Math.min(100, mapH * 0.08) : Math.min(120, mapH * 0.12);
+  const chartX = isVertical ? mapW * 0.04 : mapW * 0.05;
+  const bottomOffset = isVertical ? Math.max(320, mapH * 0.22) : 30;
+  const chartY = mapH - chartH - bottomOffset;
 
   // 1. Draw Glassmorphism Container Background
   ctx.save();
@@ -909,10 +921,6 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   });
   const curPt = getInterpolatedPoint(progress);
 
-  ctx.fillStyle = '#9ca3af'; // secondary grey
-  ctx.font = 'bold 12px sans-serif';
-  ctx.fillText('고도 프로필', chartX + 15, chartY + 22);
-
   // 현재 progress 기준 누적상승 계산
   const targetDist = progress * gpxData.totalDistance;
   let ascent = 0;
@@ -931,14 +939,34 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   const currentDistKm = (targetDist / 1000).toFixed(2);
   const totalDistKm = (gpxData.totalDistance / 1000).toFixed(2);
 
-  ctx.font = '11px sans-serif';
-  ctx.fillText(`최저: ${Math.round(minEle)}m`, chartX + chartW - 310, chartY + 22);
-  ctx.fillText(`최대: ${Math.round(maxEle)}m`, chartX + chartW - 230, chartY + 22);
-  ctx.fillText(`거리: ${currentDistKm}/${totalDistKm}km`, chartX + chartW - 150, chartY + 22);
+  ctx.save();
+  
+  // Left side: Title and Min/Max elevation
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('고도 프로필', chartX + 15, chartY + 22);
 
+  ctx.fillStyle = '#9ca3af'; // secondary grey
+  ctx.font = '11px sans-serif';
+  ctx.fillText(`최저: ${Math.round(minEle)}m  |  최대: ${Math.round(maxEle)}m`, chartX + 105, chartY + 22);
+
+  // Right side: Current status and Distance (drawn with right-alignment to prevent overlapping)
+  ctx.textAlign = 'right';
+  const distText = `거리: ${currentDistKm}/${totalDistKm}km`;
+  const currentText = `현재: ${Math.round(curPt.ele)}m (↑${Math.round(ascent)}m)`;
+  
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '11px sans-serif';
+  ctx.fillText(distText, chartX + chartW - 15, chartY + 22);
+  
+  const distTextWidth = ctx.measureText(distText).width;
+  
   ctx.fillStyle = activeColor;
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText(`현재: ${Math.round(curPt.ele)}m  ↑${Math.round(ascent)}m`, chartX + chartW - 160, chartY + 22);
+  ctx.fillText(currentText, chartX + chartW - 15 - distTextWidth - 15, chartY + 22);
+
+  ctx.restore();
 
   // Chart line bounding box (leave room for header)
   const graphX = chartX + 15;
@@ -1227,9 +1255,15 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
   
   lastBearing = null; // Reset bearing smoothing
 
+  const canvas = map.getCanvas();
+  const isVertical = canvas.height > canvas.width;
+  const targetZoom = (cameraMode === 'chase-rot' || cameraMode === 'chase-fixed') 
+    ? (isVertical ? 13.5 : 14.5) 
+    : (isVertical ? 11.5 : 13);
+
   map.jumpTo({
     center: [startPt.lon, startPt.lat],
-    zoom: (cameraMode === 'chase-rot' || cameraMode === 'chase-fixed') ? 14.5 : 13,
+    zoom: targetZoom,
     pitch: targetPitch,
     bearing: targetBearing
   });
