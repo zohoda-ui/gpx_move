@@ -878,10 +878,10 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
 
   // Chart size and coordinates on the output video
   // Responsive based on video height/width
-  const chartW = isVertical ? mapW * 0.82 : mapW * 0.9;
-  const chartH = isVertical ? Math.min(100, mapH * 0.08) : Math.min(120, mapH * 0.12);
-  const chartX = isVertical ? mapW * 0.04 : mapW * 0.05;
-  const bottomOffset = isVertical ? Math.max(320, mapH * 0.22) : 30;
+  const chartW = isVertical ? mapW * 0.88 : mapW * 0.9;
+  const chartH = isVertical ? Math.min(120, mapH * 0.1) : Math.min(120, mapH * 0.12);
+  const chartX = (mapW - chartW) / 2;
+  const bottomOffset = isVertical ? Math.max(160, mapH * 0.15) : 30;
   const chartY = mapH - chartH - bottomOffset;
 
   // 1. Draw Glassmorphism Container Background
@@ -1073,10 +1073,16 @@ async function startRecordingFlow() {
   const scale = Math.min(1, scaleX, scaleY);
   
   if (scale < 1) {
-    mapViewport.style.transform = `scale(${scale})`;
+    mapViewport.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    mapViewport.style.transformOrigin = 'center center';
     mapViewport.style.position = 'fixed';
+    mapViewport.style.top = '50%';
+    mapViewport.style.left = '50%';
   } else {
     mapViewport.style.transform = 'none';
+    mapViewport.style.position = 'absolute';
+    mapViewport.style.top = '0';
+    mapViewport.style.left = '0';
   }
   
   map.resize();
@@ -1090,6 +1096,11 @@ async function startRecordingFlow() {
   compositeCanvas = document.createElement('canvas');
   compositeCanvas.width = width;
   compositeCanvas.height = height;
+  compositeCanvas.style.position = 'fixed';
+  compositeCanvas.style.left = '-9999px';
+  compositeCanvas.style.top = '-9999px';
+  compositeCanvas.style.pointerEvents = 'none';
+  document.body.appendChild(compositeCanvas);
   compositeCtx = compositeCanvas.getContext('2d');
 
   // Set 60 FPS as requested
@@ -1129,6 +1140,12 @@ async function startRecordingFlow() {
     } catch (e) {
       mediaRecorder = new MediaRecorder(stream);
     }
+
+    mediaRecorder.onerror = (event) => {
+      console.error("MediaRecorder Error:", event.error);
+      alert("녹화 중 오류가 발생했습니다: " + (event.error ? event.error.message : "알 수 없는 오류"));
+      stopRecordingFlowCleanUp();
+    };
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data && event.data.size > 0) {
@@ -1170,7 +1187,10 @@ async function startRecordingFlow() {
       const candidateCodecs = [
         'avc1.4d401f', // H.264 Main Profile, Level 3.1
         'avc1.42e01f', // H.264 Baseline Profile, Level 3.1
-        'avc1.64001f'  // H.264 High Profile, Level 3.1
+        'avc1.64001f', // H.264 High Profile, Level 3.1
+        'avc1.4d001f', // H.264 Main Profile, Level 3.1 (Alt)
+        'avc1.42001e', // H.264 Constrained Baseline, Level 3.0
+        'avc1.640028'  // H.264 High Profile, Level 4.0
       ];
 
       let selectedCodec = null;
@@ -1281,7 +1301,7 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
     
     // Composite Frame:
     // 1. Draw Map WebGL Canvas
-    compositeCtx.drawImage(map.getCanvas(), 0, 0);
+    compositeCtx.drawImage(map.getCanvas(), 0, 0, mapW, mapH);
     
     // 2. Draw Elevation Profile overlay on top
     drawElevationChartOnComposite(compositeCtx, mapW, mapH, progress);
@@ -1313,7 +1333,8 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
         await new Promise(r => setTimeout(r, 1));  // 큐가 여유 있을 때는 초고속 루프 진행
       }
     } else {
-      await new Promise(r => setTimeout(r, 2));   // MediaRecorder 폴백 모드 시 대기 최소화
+      // MediaRecorder 폴백 모드 시 실시간 속도에 맞추어 딜레이 적용 (예: 60fps -> 프레임당 약 16.6ms 대기)
+      await new Promise(r => setTimeout(r, 1000 / fps));
     }
   }
 
@@ -1391,12 +1412,20 @@ function stopRecordingFlowCleanUp() {
   mapViewport.style.width = '100%';
   mapViewport.style.height = '100%';
   mapViewport.style.transform = 'none';
+  mapViewport.style.transformOrigin = 'unset';
   mapViewport.style.position = 'absolute';
+  mapViewport.style.top = '0';
+  mapViewport.style.left = '0';
   
   map.resize();
   
   zoomToFitRoute();
   drawElevationChart(currentProgress);
+
+  if (compositeCanvas && compositeCanvas.parentNode) {
+    compositeCanvas.parentNode.removeChild(compositeCanvas);
+    compositeCanvas = null;
+  }
 }
 
 cancelRecordBtn.addEventListener('click', () => {
