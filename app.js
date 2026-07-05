@@ -72,38 +72,10 @@ function initMap() {
 
 // Setup GPX GeoJSON Source and Layers
 function setupMapLayers() {
-  if (!map.isStyleLoaded()) return;
+  // 이미 레이어가 추가되어 있으면 중복 추가 방지
+  if (map.getSource('route-full')) return;
 
-  // Add source for the completed path
-  map.addSource('route-completed', {
-    type: 'geojson',
-    data: {
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: []
-      }
-    }
-  });
-
-  // Add layer for the completed path
-  map.addLayer({
-    id: 'route-completed-layer',
-    type: 'line',
-    source: 'route-completed',
-    layout: {
-      'line-join': 'round',
-      'line-cap': 'round'
-    },
-    paint: {
-      'line-color': activeColor,
-      'line-width': parseInt(lineWidthSelect.value, 10),
-      'line-opacity': 0.95
-    }
-  });
-
-  // Add source for the full path
+  // Add source for the full path (background)
   map.addSource('route-full', {
     type: 'geojson',
     data: {
@@ -116,7 +88,7 @@ function setupMapLayers() {
     }
   });
 
-  // Add layer for the full path
+  // Add layer for the full path (drawn FIRST = bottom)
   map.addLayer({
     id: 'route-full-layer',
     type: 'line',
@@ -132,6 +104,35 @@ function setupMapLayers() {
     }
   });
 
+  // Add source for the completed path (foreground)
+  map.addSource('route-completed', {
+    type: 'geojson',
+    data: {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'LineString',
+        coordinates: []
+      }
+    }
+  });
+
+  // Add layer for the completed path (drawn SECOND = on top of full path)
+  map.addLayer({
+    id: 'route-completed-layer',
+    type: 'line',
+    source: 'route-completed',
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round'
+    },
+    paint: {
+      'line-color': activeColor,
+      'line-width': parseInt(lineWidthSelect.value, 10),
+      'line-opacity': 0.95
+    }
+  });
+
   // Add marker source
   map.addSource('marker-source', {
     type: 'geojson',
@@ -144,7 +145,7 @@ function setupMapLayers() {
     }
   });
 
-  // Add glowing marker layer
+  // Add glowing marker layer (drawn LAST = topmost)
   map.addLayer({
     id: 'marker-glow-layer',
     type: 'circle',
@@ -250,10 +251,16 @@ function setupEvents() {
   mapStyleSelect.addEventListener('change', (e) => {
     const styleKey = e.target.value;
     map.setStyle(MAP_STYLES[styleKey]);
-    map.once('style.load', () => {
+    map.once('idle', () => {
       setupMapLayers();
       if (gpxData.points.length > 0) {
+        // 전체 경로 복원
         drawFullPath();
+        // 현재 진행된 경로 및 마커 위치 복원
+        if (currentProgress > 0) {
+          const cameraMode = document.querySelector('input[name="camera-mode"]:checked').value;
+          updateSimulationFrame(currentProgress, cameraMode);
+        }
       }
     });
   });
@@ -738,14 +745,15 @@ function updateSimulationFrame(progress, cameraMode) {
   const totalPointsCount = points.length;
   
   // Collect all raw points passed so far
-  const passedIndex = currentPt.nextIndex - 1;
+  const passedIndex = Math.max(0, currentPt.nextIndex - 1);
   for (let i = 0; i <= passedIndex; i++) {
     completedCoords.push([points[i].lon, points[i].lat]);
   }
+  // Always add the current interpolated position as the last coord
   completedCoords.push([currentPt.lon, currentPt.lat]);
 
-  // Update completed route line
-  if (map.getSource('route-completed')) {
+  // Update completed route line (need at least 2 coords for a line)
+  if (map.getSource('route-completed') && completedCoords.length >= 2) {
     map.getSource('route-completed').setData({
       type: 'Feature',
       properties: {},
@@ -811,6 +819,8 @@ function updateSimulationFrame(progress, cameraMode) {
 // ---------------- VIDEO RECORDING ENGINE (WITH GRAPH COMPOSITING) ----------------
 
 let mediaRecorder = null;
+let videoEncoder = null;
+let mp4Muxer = null;
 let recordedChunks = [];
 let abortRecording = false;
 
@@ -1000,71 +1010,112 @@ async function startRecordingFlow() {
   compositeCanvas.height = height;
   compositeCtx = compositeCanvas.getContext('2d');
 
-  let options = { mimeType: 'video/webm;codecs=vp9' };
-  if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-    options = { mimeType: 'video/webm;codecs=vp8' };
+  // Set 60 FPS as requested
+  const fps = 60;
+
+  // Update UI Message with current FPS info
+  const msgEl = document.querySelector('.rendering-message');
+  msgEl.textContent = `지도를 가리거나 크기를 조절하지 마세요. (60 FPS)`;
+
+  const useWebCodecs = typeof window.VideoEncoder !== 'undefined' && typeof window.Mp4Muxer !== 'undefined';
+
+  function setupMediaRecorderFallback() {
+    let options = { mimeType: 'video/webm;codecs=vp9' };
     if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-      options = { mimeType: 'video/webm' };
+      options = { mimeType: 'video/webm;codecs=vp8' };
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options = { mimeType: 'video/mp4' };
+        options = { mimeType: 'video/webm' };
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+          options = { mimeType: 'video/mp4' };
+        }
       }
     }
-  }
 
-  // We capture the stream from compositeCanvas instead of mapCanvas!
-  let stream;
-  try {
-    stream = compositeCanvas.captureStream(30);
-  } catch (err) {
-    console.error("Stream capture failed: ", err);
-    alert("Canvas 캡처를 지원하지 않는 브라우저이거나 보안 문제가 발생했습니다.");
-    stopRecordingFlowCleanUp();
-    return;
-  }
-
-  recordedChunks = [];
-  try {
-    mediaRecorder = new MediaRecorder(stream, options);
-  } catch (e) {
-    mediaRecorder = new MediaRecorder(stream);
-  }
-
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      recordedChunks.push(event.data);
-    }
-  };
-
-  mediaRecorder.onstop = () => {
-    if (abortRecording) {
-      recordedChunks = [];
+    let stream;
+    try {
+      stream = compositeCanvas.captureStream(fps);
+    } catch (err) {
+      console.error("Stream capture failed: ", err);
+      alert("Canvas 캡처를 지원하지 않는 브라우저이거나 보안 문제가 발생했습니다.");
+      stopRecordingFlowCleanUp();
       return;
     }
-    
-    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    
-    const ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
-    a.href = url;
-    a.download = `gpx_motion_recording.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    
-    setTimeout(() => {
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    }, 100);
 
-    stopRecordingFlowCleanUp();
-  };
+    recordedChunks = [];
+    try {
+      mediaRecorder = new MediaRecorder(stream, options);
+    } catch (e) {
+      mediaRecorder = new MediaRecorder(stream);
+    }
 
-  mediaRecorder.start();
-  runDeterministicRecordingLoop(durationSec, cameraMode, width, height);
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        recordedChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      if (abortRecording) {
+        recordedChunks = [];
+        return;
+      }
+      
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      
+      a.href = url;
+      a.download = `gpx_motion_recording.mp4`; // Always save as mp4 extension
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 100);
+
+      stopRecordingFlowCleanUp();
+    };
+
+    mediaRecorder.start();
+  }
+
+  if (useWebCodecs) {
+    try {
+      mp4Muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: {
+          codec: 'avc',
+          width: width,
+          height: height
+        },
+        fastStart: 'in-memory'
+      });
+
+      videoEncoder = new VideoEncoder({
+        output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+        error: e => console.error("WebCodecs Encoder Error:", e)
+      });
+
+      videoEncoder.configure({
+        codec: 'avc1.64001f', // H.264 profile
+        width: width,
+        height: height,
+        bitrate: 5_000_000,
+        framerate: fps
+      });
+    } catch (err) {
+      console.error("WebCodecs initialization failed, falling back to MediaRecorder:", err);
+      setupMediaRecorderFallback();
+    }
+  } else {
+    setupMediaRecorderFallback();
+  }
+
+  runDeterministicRecordingLoop(durationSec, cameraMode, width, height, fps, useWebCodecs);
 }
 
-async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH) {
-  const fps = 30;
+async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH, fps, useWebCodecs) {
   const totalFrames = durationSec * fps;
   let currentFrame = 0;
 
@@ -1101,6 +1152,18 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
     // 2. Draw Elevation Profile overlay on top
     drawElevationChartOnComposite(compositeCtx, mapW, mapH, progress);
     
+    if (useWebCodecs && videoEncoder) {
+      try {
+        const timestampUs = Math.round((currentFrame / fps) * 1000000);
+        const frame = new VideoFrame(compositeCanvas, { timestamp: timestampUs });
+        const keyFrame = currentFrame % (fps * 2) === 0;
+        videoEncoder.encode(frame, { keyFrame });
+        frame.close();
+      } catch (err) {
+        console.error("Frame encode error: ", err);
+      }
+    }
+    
     // Update UI Progress bar
     const pct = Math.round(progress * 100);
     progressBarFill.style.width = `${pct}%`;
@@ -1108,11 +1171,49 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
 
     currentFrame++;
     
-    await new Promise(r => setTimeout(r, 16));
+    // Control queue size to prevent browser freeze
+    if (useWebCodecs && videoEncoder && videoEncoder.encodeQueueSize > 15) {
+      await new Promise(r => setTimeout(r, 30));
+    } else {
+      await new Promise(r => setTimeout(r, 10));
+    }
   }
 
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  if (useWebCodecs && videoEncoder) {
+    try {
+      await videoEncoder.flush();
+      videoEncoder.close();
+      videoEncoder = null;
+      
+      mp4Muxer.finalize();
+      
+      if (!abortRecording) {
+        const { buffer } = mp4Muxer.target;
+        const blob = new Blob([buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `gpx_motion_recording.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+      }
+      
+      mp4Muxer = null;
+      stopRecordingFlowCleanUp();
+    } catch (err) {
+      console.error("MP4 Muxing finalize error: ", err);
+      alert("MP4 비디오 파일 작성 중 에러가 발생했습니다.");
+      stopRecordingFlowCleanUp();
+    }
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
   }
 }
 
@@ -1152,6 +1253,13 @@ function stopRecordingFlowCleanUp() {
 
 cancelRecordBtn.addEventListener('click', () => {
   abortRecording = true;
+  if (videoEncoder) {
+    try {
+      videoEncoder.close();
+    } catch (e) {}
+    videoEncoder = null;
+    mp4Muxer = null;
+  }
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }

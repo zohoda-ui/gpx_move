@@ -146,7 +146,7 @@
           <div class="setting-group">
             <label for="duration-input" class="setting-label">비디오 재생 시간</label>
             <div class="range-container">
-              <input type="range" id="duration-input" min="5" max="60" value="15" step="1" />
+              <input type="range" id="duration-input" min="5" max="15" value="15" step="1" />
               <span class="range-value" id="duration-value">15초</span>
             </div>
           </div>
@@ -238,6 +238,8 @@
 
   <!-- MapLibre GL JS Script -->
   <script src="https://unpkg.com/maplibre-gl@^4/dist/maplibre-gl.js"></script>
+  <!-- mp4-muxer UMD Library for MP4 encoding in browser -->
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@4.1.0/build/mp4-muxer.umd.js"></script>
   <!-- Custom Logic -->
   <script src="app.js"></script>
 </body>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Antigravity Sample GPX Generator" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Namsan Short Loop Trail</name>
+    <trkseg>
+      <trkpt lat="37.5512" lon="126.9882">
+        <ele>262</ele>
+        <time>2026-07-05T06:00:00Z</time>
+      </trkpt>
+      <trkpt lat="37.5515" lon="126.9890">
+        <ele>265</ele>
+        <time>2026-07-05T06:00:10Z</time>
+      </trkpt>
+      <trkpt lat="37.5520" lon="126.9902">
+        <ele>270</ele>
+        <time>2026-07-05T06:00:20Z</time>
+      </trkpt>
+      <trkpt lat="37.5525" lon="126.9915">
+        <ele>268</ele>
+        <time>2026-07-05T06:00:30Z</time>
+      </trkpt>
+      <trkpt lat="37.5532" lon="126.9928">
+        <ele>260</ele>
+        <time>2026-07-05T06:00:40Z</time>
+      </trkpt>
+      <trkpt lat="37.5538" lon="126.9922">
+        <ele>255</ele>
+        <time>2026-07-05T06:00:50Z</time>
+      </trkpt>
+      <trkpt lat="37.5542" lon="126.9912">
+        <ele>250</ele>
+        <time>2026-07-05T06:01:00Z</time>
+      </trkpt>
+      <trkpt lat="37.5535" lon="126.9900">
+        <ele>248</ele>
+        <time>2026-07-05T06:01:10Z</time>
+      </trkpt>
+      <trkpt lat="37.5528" lon="126.9890">
+        <ele>252</ele>
+        <time>2026-07-05T06:01:20Z</time>
+      </trkpt>
+      <trkpt lat="37.5520" lon="126.9880">
+        <ele>258</ele>
+        <time>2026-07-05T06:01:30Z</time>
+      </trkpt>
+      <trkpt lat="37.5512" lon="126.9882">
+        <ele>262</ele>
+        <time>2026-07-05T06:01:40Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>
