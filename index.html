@@ -19,6 +19,28 @@
     <div id="map-viewport">
       <div id="map"></div>
       
+      <!-- Route Stats HUD Overlay -->
+      <div id="route-stats-overlay" class="route-stats-overlay glass hidden">
+        <div class="stat-item-large">
+          <span class="stat-label-large">DISTANCE</span>
+          <span class="stat-value-large">
+            <span id="overlay-current-dist" class="highlight-cyan">0.00</span>
+            <span class="stat-slash">/</span>
+            <span id="overlay-total-dist" class="total-val">0.00</span>
+            <span class="stat-unit-large">km</span>
+          </span>
+        </div>
+        <div class="stat-divider-vertical"></div>
+        <div class="stat-item-large">
+          <span class="stat-label-large">ASCENT</span>
+          <span class="stat-value-large">
+            <span class="accent-green-arrow">↑</span>
+            <span id="overlay-total-ascent" class="highlight-green">0</span>
+            <span class="stat-unit-large">m</span>
+          </span>
+        </div>
+      </div>
+      
       <!-- Elevation Profile Glass Panel Overlay -->
       <div id="elevation-panel" class="elevation-panel glass hidden">
         <div class="elevation-header">
@@ -33,8 +55,6 @@
             <span class="stat-item">최대: <strong id="max-ele">--</strong>m</span>
             <span class="stat-item">최저: <strong id="min-ele">--</strong>m</span>
             <span class="stat-item">현재: <strong id="current-ele" class="highlight">--</strong>m</span>
-            <span class="stat-item">누적↑: <strong id="total-ascent" class="highlight-green">--</strong>m</span>
-            <span class="stat-item">거리: <strong id="current-dist" class="highlight">--</strong>/<strong id="total-dist">--</strong>km</span>
           </div>
         </div>
         <div class="chart-container">

@@ -45,10 +45,13 @@ const elevationPanel = document.getElementById('elevation-panel');
 const maxEleSpan = document.getElementById('max-ele');
 const minEleSpan = document.getElementById('min-ele');
 const currentEleSpan = document.getElementById('current-ele');
-const totalAscentSpan = document.getElementById('total-ascent');
-const currentDistSpan = document.getElementById('current-dist');
-const totalDistSpan = document.getElementById('total-dist');
 const elevationChart = document.getElementById('elevation-chart');
+
+// HUD Overlay DOMs
+const routeStatsOverlay = document.getElementById('route-stats-overlay');
+const overlayCurrentDistSpan = document.getElementById('overlay-current-dist');
+const overlayTotalDistSpan = document.getElementById('overlay-total-dist');
+const overlayTotalAscentSpan = document.getElementById('overlay-total-ascent');
 
 // Map Styles mapping
 const MAP_STYLES = {
@@ -383,9 +386,11 @@ function parseGPX(gpxText, filename) {
     maxEleSpan.textContent = Math.round(maxEle);
     minEleSpan.textContent = Math.round(minEle);
     currentEleSpan.textContent = Math.round(points[0].ele);
-    totalAscentSpan.textContent = Math.round(totalAscent);
-    totalDistSpan.textContent = (accumulatedDist / 1000).toFixed(2);
-    currentDistSpan.textContent = '0.00';
+    
+    // Fill HUD stats
+    overlayTotalAscentSpan.textContent = Math.round(totalAscent);
+    overlayTotalDistSpan.textContent = (accumulatedDist / 1000).toFixed(2);
+    overlayCurrentDistSpan.textContent = '0.00';
     
     // Toggle UI State
     dropZone.classList.add('hidden');
@@ -393,6 +398,7 @@ function parseGPX(gpxText, filename) {
     settingsSection.classList.remove('disabled');
     actionSection.classList.remove('disabled');
     elevationPanel.classList.remove('hidden');
+    routeStatsOverlay.classList.remove('hidden');
 
     // Zoom Map to GPX bounds
     zoomToFitRoute();
@@ -421,6 +427,10 @@ function resetGPXData() {
   settingsSection.classList.add('disabled');
   actionSection.classList.add('disabled');
   elevationPanel.classList.add('hidden');
+  routeStatsOverlay.classList.add('hidden');
+  overlayCurrentDistSpan.textContent = '0.00';
+  overlayTotalDistSpan.textContent = '0.00';
+  overlayTotalAscentSpan.textContent = '0';
   
   if (map) {
     if (map.getSource('route-completed')) {
@@ -664,7 +674,7 @@ function drawElevationChart(progress) {
   ctx.fillStyle = '#ffffff';
   ctx.fill();
   
-  // Update stats UI: 현재 고도, 현재 누적상승, 현재 거리
+  // Update stats UI: 현재 고도
   currentEleSpan.textContent = Math.round(curPt.ele);
 
   // 현재 진행 거리 기준 누적상승 계산 (progress 기반 정확한 계산)
@@ -684,8 +694,10 @@ function drawElevationChart(progress) {
     const gain = points[i].ele - points[i - 1].ele;
     if (gain > 0) ascent += gain;
   }
-  totalAscentSpan.textContent = Math.round(ascent);
-  currentDistSpan.textContent = (targetDist / 1000).toFixed(2);
+  
+  // Update HUD stats
+  overlayTotalAscentSpan.textContent = Math.round(ascent);
+  overlayCurrentDistSpan.textContent = (targetDist / 1000).toFixed(2);
 }
 
 // ---------------- ANIMATION & PREVIEW LOGIC ----------------
@@ -951,20 +963,13 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   ctx.font = '11px sans-serif';
   ctx.fillText(`최저: ${Math.round(minEle)}m  |  최대: ${Math.round(maxEle)}m`, chartX + 105, chartY + 22);
 
-  // Right side: Current status and Distance (drawn with right-alignment to prevent overlapping)
+  // Right side: Current status (only elevation)
   ctx.textAlign = 'right';
-  const distText = `거리: ${currentDistKm}/${totalDistKm}km`;
-  const currentText = `현재: ${Math.round(curPt.ele)}m (↑${Math.round(ascent)}m)`;
-  
-  ctx.fillStyle = '#9ca3af';
-  ctx.font = '11px sans-serif';
-  ctx.fillText(distText, chartX + chartW - 15, chartY + 22);
-  
-  const distTextWidth = ctx.measureText(distText).width;
+  const currentText = `현재: ${Math.round(curPt.ele)}m`;
   
   ctx.fillStyle = activeColor;
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText(currentText, chartX + chartW - 15 - distTextWidth - 15, chartY + 22);
+  ctx.fillText(currentText, chartX + chartW - 15, chartY + 22);
 
   ctx.restore();
 
@@ -1043,6 +1048,129 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   ctx.restore();
 }
 
+// drawRouteStatsOverlayOnComposite: Draw route stats HUD overlay on composite canvas
+function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
+  const points = gpxData.points;
+  if (points.length < 2) return;
+
+  const targetDist = progress * gpxData.totalDistance;
+  let ascent = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].dist > targetDist) {
+      const segGain = points[i].ele - points[i - 1].ele;
+      if (segGain > 0) {
+        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
+        ascent += segGain * ratio;
+      }
+      break;
+    }
+    const gain = points[i].ele - points[i - 1].ele;
+    if (gain > 0) ascent += gain;
+  }
+  const currentDistKm = (targetDist / 1000).toFixed(2);
+  const totalDistKm = (gpxData.totalDistance / 1000).toFixed(2);
+
+  ctx.save();
+
+  // HUD Box Size and Position (Centered horizontally, near top)
+  const isVertical = mapH > mapW;
+  const overlayW = isVertical ? mapW * 0.85 : 360;
+  const overlayH = 62;
+  const overlayX = (mapW - overlayW) / 2;
+  const overlayY = isVertical ? 60 : 30;
+
+  // 1. Background Panel (Glassmorphism effect in Canvas)
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+  ctx.shadowBlur = 15;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 4;
+
+  ctx.fillStyle = 'rgba(13, 16, 23, 0.75)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.lineWidth = 1.5;
+
+  const r = 12;
+  ctx.beginPath();
+  ctx.moveTo(overlayX + r, overlayY);
+  ctx.lineTo(overlayX + overlayW - r, overlayY);
+  ctx.quadraticCurveTo(overlayX + overlayW, overlayY, overlayX + overlayW, overlayY + r);
+  ctx.lineTo(overlayX + overlayW, overlayY + overlayH - r);
+  ctx.quadraticCurveTo(overlayX + overlayW, overlayY + overlayH, overlayX + overlayW - r, overlayY + overlayH);
+  ctx.lineTo(overlayX + r, overlayY + overlayH);
+  ctx.quadraticCurveTo(overlayX, overlayY + overlayH, overlayX, overlayY + overlayH - r);
+  ctx.lineTo(overlayX, overlayY + r);
+  ctx.quadraticCurveTo(overlayX, overlayY, overlayX + r, overlayY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.stroke();
+
+  // 2. Draw Distance Stat (Left half)
+  const col1X = overlayX + overlayW * 0.25;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('DISTANCE', col1X, overlayY + 18);
+
+  const valY = overlayY + 45;
+  const distVal = currentDistKm;
+  const slashTotalUnit = ` / ${totalDistKm} km`;
+  
+  ctx.font = 'bold 22px sans-serif';
+  const distValW = ctx.measureText(distVal).width;
+  ctx.font = '12px sans-serif';
+  const restW = ctx.measureText(slashTotalUnit).width;
+  
+  const totalW = distValW + restW;
+  const startTextX = col1X - totalW / 2;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = activeColor;
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(distVal, startTextX, valY);
+
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(slashTotalUnit, startTextX + distValW, valY);
+
+  // 3. Draw Vertical Divider
+  ctx.beginPath();
+  ctx.moveTo(overlayX + overlayW * 0.5, overlayY + 12);
+  ctx.lineTo(overlayX + overlayW * 0.5, overlayY + overlayH - 12);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // 4. Draw Ascent Stat (Right half)
+  const col2X = overlayX + overlayW * 0.75;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('ASCENT', col2X, overlayY + 18);
+
+  const ascentText = `↑ ${Math.round(ascent)}`;
+  const unitText = ' m';
+  
+  ctx.font = 'bold 22px sans-serif';
+  const ascentValW = ctx.measureText(ascentText).width;
+  ctx.font = '12px sans-serif';
+  const ascentUnitW = ctx.measureText(unitText).width;
+  
+  const totalAscentW = ascentValW + ascentUnitW;
+  const startAscentX = col2X - totalAscentW / 2;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#39ff14';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(ascentText, startAscentX, valY);
+
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(unitText, startAscentX + ascentValW, valY);
+
+  ctx.restore();
+}
+
 async function startRecordingFlow() {
   if (isPlaying) stopAnimation();
   
@@ -1089,6 +1217,7 @@ async function startRecordingFlow() {
   
   // Hide native HTML elevation overlay during recording, since it will be drawn to composite canvas instead
   elevationPanel.classList.add('hidden');
+  routeStatsOverlay.classList.add('hidden');
   
   await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -1306,6 +1435,9 @@ async function runDeterministicRecordingLoop(durationSec, cameraMode, mapW, mapH
     // 2. Draw Elevation Profile overlay on top
     drawElevationChartOnComposite(compositeCtx, mapW, mapH, progress);
     
+    // 3. Draw Route Stats HUD overlay on top
+    drawRouteStatsOverlayOnComposite(compositeCtx, mapW, mapH, progress);
+    
     if (useWebCodecs && videoEncoder) {
       try {
         const timestampUs = Math.round((currentFrame / fps) * 1000000);
@@ -1407,6 +1539,7 @@ function stopRecordingFlowCleanUp() {
   
   // Revert HTML overlay state
   elevationPanel.classList.remove('hidden');
+  routeStatsOverlay.classList.remove('hidden');
   
   mapViewport.classList.remove('recording-mode');
   mapViewport.style.width = '100%';

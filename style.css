@@ -722,3 +722,98 @@ input[type="range"]::-webkit-slider-thumb:hover {
   height: 100%;
   display: block;
 }
+
+/* Route Stats HUD Overlay Styles */
+.route-stats-overlay {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 28px;
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  transition: var(--transition-smooth);
+  box-shadow: var(--shadow-lg);
+  min-width: 320px;
+  justify-content: center;
+}
+
+/* When recording (vertical or adjusted viewport) */
+#map-viewport.recording-mode .route-stats-overlay {
+  top: 40px;
+  min-width: 300px;
+  background: rgba(13, 16, 23, 0.75);
+}
+
+.stat-item-large {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.stat-label-large {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+
+.stat-value-large {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  line-height: 1.1;
+}
+
+.stat-unit-large {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
+
+.stat-slash {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.15);
+  margin: 0 4px;
+  font-weight: 400;
+}
+
+.total-val {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.stat-divider-vertical {
+  width: 1px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.highlight-cyan {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.highlight-green {
+  color: #39ff14;
+  text-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
+}
+
+.accent-green-arrow {
+  color: #39ff14;
+  font-weight: 800;
+  margin-right: 2px;
+  font-size: 1.4rem;
+}
+
