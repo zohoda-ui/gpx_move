@@ -1,10 +1,11 @@
 // Global state
 let map = null;
 let gpxData = {
-  points: [],      // Array of {lat, lon, ele, time, dist}
+  points: [],      // Array of {lat, lon, ele, time, dist, cumulativeAscent}
   totalDistance: 0, // in meters
   totalAscent: 0   // cumulative elevation gain in meters
 };
+let globalRawPoints = []; // Stores raw GPX parsed points for recalculating on mode change
 let isPlaying = false;
 let isRecording = false;
 let animationFrameId = null;
@@ -13,6 +14,7 @@ let activeColor = '#00f3ff';
 let lastBearing = null; // Used for smoothing camera rotation
 
 // DOM Elements
+const modeRadios = document.querySelectorAll('input[name="activity-mode"]');
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const browseBtn = document.getElementById('browse-btn');
@@ -52,6 +54,9 @@ const routeStatsOverlay = document.getElementById('route-stats-overlay');
 const overlayCurrentDistSpan = document.getElementById('overlay-current-dist');
 const overlayTotalDistSpan = document.getElementById('overlay-total-dist');
 const overlayTotalAscentSpan = document.getElementById('overlay-total-ascent');
+
+// HUD & Elevation Profile Wrapper DOM
+const hudElevationWrapper = document.getElementById('hud-elevation-wrapper');
 
 // Map Styles mapping
 const MAP_STYLES = {
@@ -301,6 +306,180 @@ function setupEvents() {
         });
     });
   }
+
+  // Activity Mode Selector Change Event
+  modeRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (globalRawPoints.length > 0) {
+        processGPXData();
+        
+        // Update file info display with new distance & points
+        const distanceKm = (gpxData.totalDistance / 1000).toFixed(2);
+        infoDetails.textContent = `거리: ${distanceKm} km | 포인트: ${gpxData.points.length}개`;
+        
+        // Find min/max elevation
+        let minEle = Infinity;
+        let maxEle = -Infinity;
+        gpxData.points.forEach(pt => {
+          if (pt.ele < minEle) minEle = pt.ele;
+          if (pt.ele > maxEle) maxEle = pt.ele;
+        });
+        maxEleSpan.textContent = Math.round(maxEle);
+        minEleSpan.textContent = Math.round(minEle);
+        currentEleSpan.textContent = Math.round(gpxData.points[0].ele);
+        
+        // Update HUD stats
+        overlayTotalAscentSpan.textContent = Math.round(gpxData.totalAscent);
+        overlayTotalDistSpan.textContent = distanceKm;
+        
+        // Redraw route on map
+        drawFullPath();
+        
+        // Redraw current progress state
+        const cameraMode = document.querySelector('input[name="camera-mode"]:checked').value;
+        updateSimulationFrame(currentProgress, cameraMode);
+        drawElevationChart(currentProgress);
+      }
+    });
+  });
+}
+
+// Process globalRawPoints according to the active activity mode
+function processGPXData() {
+  if (globalRawPoints.length === 0) return;
+  
+  // Get active mode
+  const selectedMode = document.querySelector('input[name="activity-mode"]:checked').value;
+  
+  if (selectedMode === 'trail') {
+    // 0. Compute average spacing (meters)
+    let tempDistance = 0;
+    for (let i = 1; i < globalRawPoints.length; i++) {
+      tempDistance += haversineDistance(
+        globalRawPoints[i-1].lat, globalRawPoints[i-1].lon,
+        globalRawPoints[i].lat, globalRawPoints[i].lon
+      );
+    }
+    const numPoints = globalRawPoints.length;
+    const avgSpacing = numPoints > 1 ? tempDistance / (numPoints - 1) : 0;
+    
+    // Dynamic settings based on data spacing (adapted from Desktop index.html)
+    let SMOOTHING_WINDOW = 2;
+    let ELEVATION_THRESHOLD = 0.2;
+    
+    if (avgSpacing >= 55) {
+      SMOOTHING_WINDOW = 1;
+      ELEVATION_THRESHOLD = 0.2;
+    } else if (avgSpacing >= 40) {
+      SMOOTHING_WINDOW = 0;
+      ELEVATION_THRESHOLD = 0.2;
+    } else if (avgSpacing >= 15) {
+      SMOOTHING_WINDOW = 1;
+      ELEVATION_THRESHOLD = 0.2;
+    } else {
+      SMOOTHING_WINDOW = 2;
+      ELEVATION_THRESHOLD = 0.2;
+    }
+    
+    console.log(`[GPX Trail Mode] numPoints: ${numPoints}, avgSpacing: ${avgSpacing.toFixed(1)}m, window: ${SMOOTHING_WINDOW}, threshold: ${ELEVATION_THRESHOLD}`);
+    
+    // 1. Smooth elevation data
+    const smoothedPoints = [];
+    for (let i = 0; i < globalRawPoints.length; i++) {
+      let sum = 0;
+      let count = 0;
+      const start = Math.max(0, i - SMOOTHING_WINDOW);
+      const end = Math.min(globalRawPoints.length - 1, i + SMOOTHING_WINDOW);
+      for (let j = start; j <= end; j++) {
+        sum += globalRawPoints[j].ele;
+        count++;
+      }
+      smoothedPoints.push({
+        lat: globalRawPoints[i].lat,
+        lon: globalRawPoints[i].lon,
+        ele: sum / count,
+        time: globalRawPoints[i].time
+      });
+    }
+    
+    // 2. Compute distance and cumulative elevation gain
+    const points = [];
+    let accumulatedDist = 0;
+    let totalAscent = 0;
+    let lastValidEle = null;
+    
+    for (let i = 0; i < smoothedPoints.length; i++) {
+      const pt = smoothedPoints[i];
+      const lat = pt.lat;
+      const lon = pt.lon;
+      const ele = pt.ele;
+      
+      if (i === 0) {
+        lastValidEle = ele;
+      } else {
+        const prevPt = smoothedPoints[i-1];
+        accumulatedDist += haversineDistance(prevPt.lat, prevPt.lon, lat, lon);
+        
+        if (lastValidEle !== null) {
+          const eleDiff = ele - lastValidEle;
+          if (eleDiff > ELEVATION_THRESHOLD) {
+            totalAscent += eleDiff;
+            lastValidEle = ele;
+          } else if (eleDiff < -ELEVATION_THRESHOLD) {
+            lastValidEle = ele; // Reset reference on descent
+          }
+        }
+      }
+      
+      points.push({
+        lat,
+        lon,
+        ele,
+        time: pt.time,
+        dist: accumulatedDist,
+        cumulativeAscent: totalAscent
+      });
+    }
+    
+    gpxData.points = points;
+    gpxData.totalDistance = accumulatedDist;
+    gpxData.totalAscent = totalAscent;
+    
+  } else {
+    // Road Marathon Mode: standard calculations (no smoothing, no threshold filter)
+    const points = [];
+    let accumulatedDist = 0;
+    let totalAscent = 0;
+    
+    for (let i = 0; i < globalRawPoints.length; i++) {
+      const pt = globalRawPoints[i];
+      const lat = pt.lat;
+      const lon = pt.lon;
+      const ele = pt.ele;
+      
+      if (i > 0) {
+        const prevPt = globalRawPoints[i-1];
+        accumulatedDist += haversineDistance(prevPt.lat, prevPt.lon, lat, lon);
+        const eleGain = ele - prevPt.ele;
+        if (eleGain > 0) {
+          totalAscent += eleGain;
+        }
+      }
+      
+      points.push({
+        lat,
+        lon,
+        ele,
+        time: pt.time,
+        dist: accumulatedDist,
+        cumulativeAscent: totalAscent
+      });
+    }
+    
+    gpxData.points = points;
+    gpxData.totalDistance = accumulatedDist;
+    gpxData.totalAscent = totalAscent;
+  }
 }
 
 // Handle GPX File Input
@@ -335,11 +514,7 @@ function parseGPX(gpxText, filename) {
       return;
     }
 
-    const points = [];
-    let accumulatedDist = 0;
-    let totalAscent = 0;
-    let minEle = Infinity;
-    let maxEle = -Infinity;
+    globalRawPoints = [];
 
     for (let i = 0; i < trackPoints.length; i++) {
       const pt = trackPoints[i];
@@ -354,28 +529,28 @@ function parseGPX(gpxText, filename) {
 
       if (isNaN(lat) || isNaN(lon)) continue;
 
-      if (ele < minEle) minEle = ele;
-      if (ele > maxEle) maxEle = ele;
-
-      if (i > 0) {
-        const prevPt = points[points.length - 1];
-        accumulatedDist += haversineDistance(prevPt.lat, prevPt.lon, lat, lon);
-        // 누적 상승 계산 (이전 포인트보다 고도가 높아진 경우만)
-        const eleGain = ele - prevPt.ele;
-        if (eleGain > 0) totalAscent += eleGain;
-      }
-
-      points.push({ lat, lon, ele, time, dist: accumulatedDist });
+      globalRawPoints.push({ lat, lon, ele, time });
     }
 
-    if (points.length < 2) {
+    if (globalRawPoints.length < 2) {
       alert('비행 애니메이션을 위해서는 최소 2개 이상의 유효한 트랙 포인트가 필요합니다.');
       return;
     }
 
-    gpxData.points = points;
-    gpxData.totalDistance = accumulatedDist;
-    gpxData.totalAscent = totalAscent;
+    // Process parsed points based on active mode
+    processGPXData();
+
+    const points = gpxData.points;
+    const accumulatedDist = gpxData.totalDistance;
+    const totalAscent = gpxData.totalAscent;
+
+    // Find min/max elevation based on processed points
+    let minEle = Infinity;
+    let maxEle = -Infinity;
+    points.forEach(pt => {
+      if (pt.ele < minEle) minEle = pt.ele;
+      if (pt.ele > maxEle) maxEle = pt.ele;
+    });
 
     // Show File Meta Info
     infoFilename.textContent = filename;
@@ -389,7 +564,7 @@ function parseGPX(gpxText, filename) {
     
     // Fill HUD stats
     overlayTotalAscentSpan.textContent = Math.round(totalAscent);
-    overlayTotalDistSpan.textContent = (accumulatedDist / 1000).toFixed(2);
+    overlayTotalDistSpan.textContent = distanceKm;
     overlayCurrentDistSpan.textContent = '0.00';
     
     // Toggle UI State
@@ -397,8 +572,7 @@ function parseGPX(gpxText, filename) {
     fileInfo.classList.remove('hidden');
     settingsSection.classList.remove('disabled');
     actionSection.classList.remove('disabled');
-    elevationPanel.classList.remove('hidden');
-    routeStatsOverlay.classList.remove('hidden');
+    hudElevationWrapper.classList.remove('hidden');
 
     // Zoom Map to GPX bounds
     zoomToFitRoute();
@@ -420,14 +594,14 @@ function parseGPX(gpxText, filename) {
 function resetGPXData() {
   stopAnimation();
   gpxData = { points: [], totalDistance: 0 };
+  globalRawPoints = []; // Reset global raw points
   lastBearing = null;
   
   dropZone.classList.remove('hidden');
   fileInfo.classList.add('hidden');
   settingsSection.classList.add('disabled');
   actionSection.classList.add('disabled');
-  elevationPanel.classList.add('hidden');
-  routeStatsOverlay.classList.add('hidden');
+  hudElevationWrapper.classList.add('hidden');
   overlayCurrentDistSpan.textContent = '0.00';
   overlayTotalDistSpan.textContent = '0.00';
   overlayTotalAscentSpan.textContent = '0';
@@ -501,7 +675,8 @@ function getInterpolatedPoint(progress) {
   }
 
   if (idx >= points.length - 1) {
-    return { ...points[points.length - 1], nextIndex: points.length - 1 };
+    const lastPt = points[points.length - 1];
+    return { ...lastPt, cumulativeAscent: lastPt.cumulativeAscent, nextIndex: points.length - 1 };
   }
 
   const p1 = points[idx];
@@ -517,7 +692,10 @@ function getInterpolatedPoint(progress) {
   const lat = p1.lat + (p2.lat - p1.lat) * factor;
   const ele = p1.ele + (p2.ele - p1.ele) * factor;
   
-  return { lat, lon, ele, nextIndex: idx + 1 };
+  // Interpolate cumulativeAscent
+  const cumulativeAscent = p1.cumulativeAscent + (p2.cumulativeAscent - p1.cumulativeAscent) * factor;
+  
+  return { lat, lon, ele, time: p1.time, dist: targetDist, cumulativeAscent, nextIndex: idx + 1 };
 }
 
 // Shortest angle difference interpolation (prevents camera spinning 360)
@@ -677,23 +855,9 @@ function drawElevationChart(progress) {
   // Update stats UI: 현재 고도
   currentEleSpan.textContent = Math.round(curPt.ele);
 
-  // 현재 진행 거리 기준 누적상승 계산 (progress 기반 정확한 계산)
-  // points는 함수 상단의 const points = gpxData.points 재사용
+  // 현재 진행 거리 기준 누적상승 가져오기 (보간된 값 사용)
   const targetDist = progress * gpxData.totalDistance;
-  let ascent = 0;
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].dist > targetDist) {
-      // 마지막 구간 일부 반영 (비례 보간)
-      const segGain = points[i].ele - points[i - 1].ele;
-      if (segGain > 0) {
-        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
-        ascent += segGain * ratio;
-      }
-      break;
-    }
-    const gain = points[i].ele - points[i - 1].ele;
-    if (gain > 0) ascent += gain;
-  }
+  const ascent = curPt.cumulativeAscent;
   
   // Update HUD stats
   overlayTotalAscentSpan.textContent = Math.round(ascent);
@@ -933,21 +1097,9 @@ function drawElevationChartOnComposite(ctx, mapW, mapH, progress) {
   });
   const curPt = getInterpolatedPoint(progress);
 
-  // 현재 progress 기준 누적상승 계산
+  // Use precomputed cumulativeAscent directly
   const targetDist = progress * gpxData.totalDistance;
-  let ascent = 0;
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].dist > targetDist) {
-      const segGain = points[i].ele - points[i - 1].ele;
-      if (segGain > 0) {
-        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
-        ascent += segGain * ratio;
-      }
-      break;
-    }
-    const gain = points[i].ele - points[i - 1].ele;
-    if (gain > 0) ascent += gain;
-  }
+  const ascent = curPt.cumulativeAscent;
   const currentDistKm = (targetDist / 1000).toFixed(2);
   const totalDistKm = (gpxData.totalDistance / 1000).toFixed(2);
 
@@ -1054,30 +1206,24 @@ function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
   if (points.length < 2) return;
 
   const targetDist = progress * gpxData.totalDistance;
-  let ascent = 0;
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].dist > targetDist) {
-      const segGain = points[i].ele - points[i - 1].ele;
-      if (segGain > 0) {
-        const ratio = (targetDist - points[i - 1].dist) / (points[i].dist - points[i - 1].dist);
-        ascent += segGain * ratio;
-      }
-      break;
-    }
-    const gain = points[i].ele - points[i - 1].ele;
-    if (gain > 0) ascent += gain;
-  }
+  const curPt = getInterpolatedPoint(progress);
+  const ascent = curPt.cumulativeAscent;
   const currentDistKm = (targetDist / 1000).toFixed(2);
   const totalDistKm = (gpxData.totalDistance / 1000).toFixed(2);
 
   ctx.save();
 
-  // HUD Box Size and Position (Centered horizontally, near top)
+  // HUD Box Size and Position (Centered horizontally, dynamically placed above the elevation chart)
   const isVertical = mapH > mapW;
-  const overlayW = isVertical ? mapW * 0.85 : 360;
-  const overlayH = 62;
+  const overlayW = isVertical ? mapW * 0.88 : 420;
+  const overlayH = 96;
   const overlayX = (mapW - overlayW) / 2;
-  const overlayY = isVertical ? 60 : 30;
+
+  // Calculate elevation chart's Y position to place stats overlay right above it
+  const chartH = isVertical ? Math.min(120, mapH * 0.1) : Math.min(120, mapH * 0.12);
+  const bottomOffset = isVertical ? Math.max(160, mapH * 0.15) : 30;
+  const chartY = mapH - chartH - bottomOffset;
+  const overlayY = chartY - overlayH - 16; // 16px gap above the chart panel
 
   // 1. Background Panel (Glassmorphism effect in Canvas)
   ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
@@ -1109,16 +1255,16 @@ function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
   const col1X = overlayX + overlayW * 0.25;
   ctx.textAlign = 'center';
   ctx.fillStyle = '#9ca3af';
-  ctx.font = 'bold 9px sans-serif';
-  ctx.fillText('DISTANCE', col1X, overlayY + 18);
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('DISTANCE', col1X, overlayY + 28);
 
-  const valY = overlayY + 45;
+  const valY = overlayY + 68;
   const distVal = currentDistKm;
   const slashTotalUnit = ` / ${totalDistKm} km`;
   
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = 'bold 32px sans-serif';
   const distValW = ctx.measureText(distVal).width;
-  ctx.font = '12px sans-serif';
+  ctx.font = '18px sans-serif';
   const restW = ctx.measureText(slashTotalUnit).width;
   
   const totalW = distValW + restW;
@@ -1126,17 +1272,17 @@ function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
 
   ctx.textAlign = 'left';
   ctx.fillStyle = activeColor;
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = 'bold 32px sans-serif';
   ctx.fillText(distVal, startTextX, valY);
 
   ctx.fillStyle = '#9ca3af';
-  ctx.font = '12px sans-serif';
+  ctx.font = '18px sans-serif';
   ctx.fillText(slashTotalUnit, startTextX + distValW, valY);
 
   // 3. Draw Vertical Divider
   ctx.beginPath();
-  ctx.moveTo(overlayX + overlayW * 0.5, overlayY + 12);
-  ctx.lineTo(overlayX + overlayW * 0.5, overlayY + overlayH - 12);
+  ctx.moveTo(overlayX + overlayW * 0.5, overlayY + 18);
+  ctx.lineTo(overlayX + overlayW * 0.5, overlayY + overlayH - 18);
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
   ctx.lineWidth = 1;
   ctx.stroke();
@@ -1145,15 +1291,15 @@ function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
   const col2X = overlayX + overlayW * 0.75;
   ctx.textAlign = 'center';
   ctx.fillStyle = '#9ca3af';
-  ctx.font = 'bold 9px sans-serif';
-  ctx.fillText('ASCENT', col2X, overlayY + 18);
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('ASCENT', col2X, overlayY + 28);
 
   const ascentText = `↑ ${Math.round(ascent)}`;
   const unitText = ' m';
   
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = 'bold 32px sans-serif';
   const ascentValW = ctx.measureText(ascentText).width;
-  ctx.font = '12px sans-serif';
+  ctx.font = '18px sans-serif';
   const ascentUnitW = ctx.measureText(unitText).width;
   
   const totalAscentW = ascentValW + ascentUnitW;
@@ -1161,11 +1307,11 @@ function drawRouteStatsOverlayOnComposite(ctx, mapW, mapH, progress) {
 
   ctx.textAlign = 'left';
   ctx.fillStyle = '#39ff14';
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = 'bold 32px sans-serif';
   ctx.fillText(ascentText, startAscentX, valY);
 
   ctx.fillStyle = '#9ca3af';
-  ctx.font = '12px sans-serif';
+  ctx.font = '18px sans-serif';
   ctx.fillText(unitText, startAscentX + ascentValW, valY);
 
   ctx.restore();
@@ -1216,8 +1362,7 @@ async function startRecordingFlow() {
   map.resize();
   
   // Hide native HTML elevation overlay during recording, since it will be drawn to composite canvas instead
-  elevationPanel.classList.add('hidden');
-  routeStatsOverlay.classList.add('hidden');
+  hudElevationWrapper.classList.add('hidden');
   
   await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -1538,8 +1683,7 @@ function stopRecordingFlowCleanUp() {
   renderingOverlay.classList.add('hidden');
   
   // Revert HTML overlay state
-  elevationPanel.classList.remove('hidden');
-  routeStatsOverlay.classList.remove('hidden');
+  hudElevationWrapper.classList.remove('hidden');
   
   mapViewport.classList.remove('recording-mode');
   mapViewport.style.width = '100%';

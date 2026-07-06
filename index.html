@@ -19,46 +19,49 @@
     <div id="map-viewport">
       <div id="map"></div>
       
-      <!-- Route Stats HUD Overlay -->
-      <div id="route-stats-overlay" class="route-stats-overlay glass hidden">
-        <div class="stat-item-large">
-          <span class="stat-label-large">DISTANCE</span>
-          <span class="stat-value-large">
-            <span id="overlay-current-dist" class="highlight-cyan">0.00</span>
-            <span class="stat-slash">/</span>
-            <span id="overlay-total-dist" class="total-val">0.00</span>
-            <span class="stat-unit-large">km</span>
-          </span>
-        </div>
-        <div class="stat-divider-vertical"></div>
-        <div class="stat-item-large">
-          <span class="stat-label-large">ASCENT</span>
-          <span class="stat-value-large">
-            <span class="accent-green-arrow">↑</span>
-            <span id="overlay-total-ascent" class="highlight-green">0</span>
-            <span class="stat-unit-large">m</span>
-          </span>
-        </div>
-      </div>
-      
-      <!-- Elevation Profile Glass Panel Overlay -->
-      <div id="elevation-panel" class="elevation-panel glass hidden">
-        <div class="elevation-header">
-          <div class="elevation-title-group">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="title-icon">
-              <path d="M3 17l6-6 4 4 8-8"></path>
-              <polyline points="14 7 20 7 20 13"></polyline>
-            </svg>
-            <span class="elevation-title">고도 프로필</span>
+      <!-- HUD & Elevation Profile Wrapper -->
+      <div id="hud-elevation-wrapper" class="hud-elevation-wrapper hidden">
+        <!-- Route Stats HUD Overlay -->
+        <div id="route-stats-overlay" class="route-stats-overlay glass">
+          <div class="stat-item-large">
+            <span class="stat-label-large">DISTANCE</span>
+            <span class="stat-value-large">
+              <span id="overlay-current-dist" class="highlight-cyan">0.00</span>
+              <span class="stat-slash">/</span>
+              <span id="overlay-total-dist" class="total-val">0.00</span>
+              <span class="stat-unit-large">km</span>
+            </span>
           </div>
-          <div class="elevation-stats">
-            <span class="stat-item">최대: <strong id="max-ele">--</strong>m</span>
-            <span class="stat-item">최저: <strong id="min-ele">--</strong>m</span>
-            <span class="stat-item">현재: <strong id="current-ele" class="highlight">--</strong>m</span>
+          <div class="stat-divider-vertical"></div>
+          <div class="stat-item-large">
+            <span class="stat-label-large">ASCENT</span>
+            <span class="stat-value-large">
+              <span class="accent-green-arrow">↑</span>
+              <span id="overlay-total-ascent" class="highlight-green">0</span>
+              <span class="stat-unit-large">m</span>
+            </span>
           </div>
         </div>
-        <div class="chart-container">
-          <canvas id="elevation-chart"></canvas>
+        
+        <!-- Elevation Profile Glass Panel Overlay -->
+        <div id="elevation-panel" class="elevation-panel glass">
+          <div class="elevation-header">
+            <div class="elevation-title-group">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="title-icon">
+                <path d="M3 17l6-6 4 4 8-8"></path>
+                <polyline points="14 7 20 7 20 13"></polyline>
+              </svg>
+              <span class="elevation-title">고도 프로필</span>
+            </div>
+            <div class="elevation-stats">
+              <span class="stat-item">최대: <strong id="max-ele">--</strong>m</span>
+              <span class="stat-item">최저: <strong id="min-ele">--</strong>m</span>
+              <span class="stat-item">현재: <strong id="current-ele" class="highlight">--</strong>m</span>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="elevation-chart"></canvas>
+          </div>
         </div>
       </div>
     </div>
@@ -76,10 +79,40 @@
 
     <!-- Sidebar Control Panel -->
     <main class="control-panel glass">
-      <!-- Section 1: GPX Upload -->
-      <section class="panel-section" id="upload-section">
+      <!-- Section 1: Course Type Select -->
+      <section class="panel-section" id="mode-section">
         <div class="section-header">
           <span class="step-badge">1</span>
+          <h2>코스 타입 선택</h2>
+        </div>
+        <div class="radio-tiles">
+          <label class="radio-tile">
+            <input type="radio" name="activity-mode" value="road" checked />
+            <span class="tile-content" style="flex-direction: row; gap: 8px; justify-content: center; padding: 12px 10px;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="7"></circle>
+                <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
+              </svg>
+              <span>로드 마라톤</span>
+            </span>
+          </label>
+          <label class="radio-tile">
+            <input type="radio" name="activity-mode" value="trail" />
+            <span class="tile-content" style="flex-direction: row; gap: 8px; justify-content: center; padding: 12px 10px;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 22L12 8l8 14H4z"></path>
+                <path d="M8 22l4-7 4 7H8z"></path>
+              </svg>
+              <span>트레일 러닝</span>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Section 2: GPX Upload -->
+      <section class="panel-section" id="upload-section">
+        <div class="section-header">
+          <span class="step-badge">2</span>
           <h2>GPX 파일 업로드</h2>
         </div>
         <div id="drop-zone" class="drop-zone">
@@ -119,10 +152,10 @@
         </div>
       </section>
 
-      <!-- Section 2: Animation & Video Settings -->
+      <!-- Section 3: Animation & Video Settings -->
       <section class="panel-section disabled" id="settings-section">
         <div class="section-header">
-          <span class="step-badge">2</span>
+          <span class="step-badge">3</span>
           <h2>애니메이션 & 비디오 설정</h2>
         </div>
 

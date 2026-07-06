@@ -645,24 +645,35 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Elevation Panel Styles */
-.elevation-panel {
+/* HUD & Elevation Profile Wrapper Styles */
+.hud-elevation-wrapper {
   position: absolute;
   bottom: 24px;
   left: 24px;
   right: 448px; /* Offset sidebar to not overlap */
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+  transition: var(--transition-smooth);
+}
+
+/* When in recording mode, adjust wrapper right edge since sidebar hides */
+#map-viewport.recording-mode .hud-elevation-wrapper {
+  right: 24px;
+  bottom: 30px;
+}
+
+/* Elevation Panel Styles */
+.elevation-panel {
+  width: 100%;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   pointer-events: auto;
   transition: var(--transition-smooth);
-}
-
-/* When in recording mode, adjust panel right edge since sidebar hides */
-#map-viewport.recording-mode .elevation-panel {
-  right: 24px;
 }
 
 .elevation-header {
@@ -725,28 +736,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 /* Route Stats HUD Overlay Styles */
 .route-stats-overlay {
-  position: absolute;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 12px 28px;
+  gap: 20px;
+  padding: 16px 20px;
   border-radius: var(--radius-md);
-  pointer-events: none;
+  pointer-events: auto;
   transition: var(--transition-smooth);
   box-shadow: var(--shadow-lg);
-  min-width: 320px;
   justify-content: center;
-}
-
-/* When recording (vertical or adjusted viewport) */
-#map-viewport.recording-mode .route-stats-overlay {
-  top: 40px;
-  min-width: 300px;
-  background: rgba(13, 16, 23, 0.75);
 }
 
 .stat-item-large {
@@ -757,16 +756,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .stat-label-large {
-  font-size: 0.65rem;
+  font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--text-secondary);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   text-transform: uppercase;
 }
 
 .stat-value-large {
-  font-size: 1.6rem;
+  font-size: 2.4rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   display: flex;
@@ -775,28 +774,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .stat-unit-large {
-  font-size: 0.8rem;
+  font-size: 1.1rem;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-left: 2px;
+  margin-left: 3px;
 }
 
 .stat-slash {
-  font-size: 1rem;
+  font-size: 1.4rem;
   color: rgba(255, 255, 255, 0.15);
-  margin: 0 4px;
+  margin: 0 6px;
   font-weight: 400;
 }
 
 .total-val {
-  font-size: 1.1rem;
+  font-size: 1.5rem;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .stat-divider-vertical {
   width: 1px;
-  height: 28px;
+  height: 40px;
   background: rgba(255, 255, 255, 0.1);
 }
 
@@ -814,6 +813,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: #39ff14;
   font-weight: 800;
   margin-right: 2px;
-  font-size: 1.4rem;
+  font-size: 2.2rem;
 }
 
