@@ -344,6 +344,120 @@ function setupEvents() {
   });
 }
 
+// ===== Elevation Filter Helper Functions (from gpx-road & gpx) =====
+
+// Savitzky-Golay Filter (Road Marathon)
+function savitzkyGolaySmooth(points, windowSize = 11) {
+  const n = points.length;
+  if (n < windowSize) return points.map(p => ({ ...p }));
+
+  const coeffs = [-36, 9, 44, 69, 84, 89, 84, 69, 44, 9, -36];
+  const denom = 429;
+  const coeffs7 = [-2, 3, 6, 7, 6, 3, -2];
+  const denom7 = 21;
+  const smoothed = points.map(p => ({ ...p }));
+
+  for (let i = 0; i < n; i++) {
+    if (i < 5 || i > n - 6) {
+      if (i >= 3 && i <= n - 4) {
+        let sum = 0;
+        for (let k = -3; k <= 3; k++) {
+          sum += points[i + k].ele * coeffs7[k + 3];
+        }
+        smoothed[i].ele = sum / denom7;
+      } else {
+        let sum = 0;
+        let count = 0;
+        for (let k = Math.max(0, i - 2); k <= Math.min(n - 1, i + 2); k++) {
+          sum += points[k].ele;
+          count++;
+        }
+        smoothed[i].ele = sum / count;
+      }
+    } else {
+      let sum = 0;
+      for (let k = -5; k <= 5; k++) {
+        sum += points[i + k].ele * coeffs[k + 5];
+      }
+      smoothed[i].ele = sum / denom;
+    }
+  }
+  return smoothed;
+}
+
+// Hampel Filter (Road Marathon)
+function hampelFilter(points, windowSize = 5, thresholdFactor = 3) {
+  if (!points || points.length <= windowSize) return points;
+  const n = points.length;
+  const half = Math.floor(windowSize / 2);
+  const result = points.map(p => ({ ...p }));
+
+  for (let i = 0; i < n; i++) {
+    const start = Math.max(0, i - half);
+    const end = Math.min(n - 1, i + half);
+    const windowValues = [];
+    for (let j = start; j <= end; j++) {
+      if (points[j].ele !== null && points[j].ele !== undefined && !isNaN(points[j].ele)) {
+        windowValues.push(points[j].ele);
+      }
+    }
+    if (windowValues.length === 0) continue;
+    windowValues.sort((a, b) => a - b);
+    const median = windowValues[Math.floor(windowValues.length / 2)];
+    const diffs = windowValues.map(v => Math.abs(v - median));
+    diffs.sort((a, b) => a - b);
+    const mad = diffs[Math.floor(diffs.length / 2)];
+    const scaleLimit = thresholdFactor * Math.max(mad, 1.0);
+    if (Math.abs(points[i].ele - median) > scaleLimit) {
+      result[i].ele = Math.round(median * 10) / 10;
+    }
+  }
+  return result;
+}
+
+// Remove Spikes (Road Marathon)
+function removeSpikes(points, maxSlopePct = 35) {
+  if (!points || points.length <= 2) return points;
+  const n = points.length;
+  const result = points.map(p => ({ ...p }));
+  let inSpikeSection = false;
+  let spikeStartEle = 0;
+  let spikeStartIdx = -1;
+
+  for (let i = 1; i < n; i++) {
+    const p1 = result[i - 1];
+    const p2 = result[i];
+    const d = haversineDistance(p1.lat, p1.lon, p2.lat, p2.lon);
+    if (d === 0) continue;
+
+    const ele1 = p1.ele;
+    const ele2 = p2.ele;
+    if (ele1 === null || ele2 === null || isNaN(ele1) || isNaN(ele2)) continue;
+
+    const dh = ele2 - ele1;
+    const slope = (dh / d) * 100;
+
+    if (!inSpikeSection) {
+      if (Math.abs(slope) > maxSlopePct) {
+        inSpikeSection = true;
+        spikeStartIdx = i;
+        spikeStartEle = ele1;
+      }
+    } else {
+      const diffFromStart = Math.abs(ele2 - spikeStartEle);
+      if (diffFromStart <= 5.0) {
+        const totalSteps = i - spikeStartIdx + 1;
+        for (let j = spikeStartIdx; j < i; j++) {
+          const t = (j - spikeStartIdx + 1) / totalSteps;
+          result[j].ele = Math.round((spikeStartEle + (ele2 - spikeStartEle) * t) * 10) / 10;
+        }
+        inSpikeSection = false;
+      }
+    }
+  }
+  return result;
+}
+
 // Process globalRawPoints according to the active activity mode
 function processGPXData() {
   if (globalRawPoints.length === 0) return;
@@ -352,7 +466,8 @@ function processGPXData() {
   const selectedMode = document.querySelector('input[name="activity-mode"]:checked').value;
   
   if (selectedMode === 'trail') {
-    // 0. Compute average spacing (meters)
+    // ===== 트레일러닝 모드 (github.com/zohoda-ui/gpx 알고리즘) =====
+    // 0. 포인트 평균 간격(m) 계산
     let tempDistance = 0;
     for (let i = 1; i < globalRawPoints.length; i++) {
       tempDistance += haversineDistance(
@@ -363,7 +478,7 @@ function processGPXData() {
     const numPoints = globalRawPoints.length;
     const avgSpacing = numPoints > 1 ? tempDistance / (numPoints - 1) : 0;
     
-    // Dynamic settings based on data spacing (adapted from Desktop index.html)
+    // 데이터 밀도(평균 간격)에 따라 동적 스무딩 윈도우 & 임계값 설정
     let SMOOTHING_WINDOW = 2;
     let ELEVATION_THRESHOLD = 0.2;
     
@@ -383,7 +498,7 @@ function processGPXData() {
     
     console.log(`[GPX Trail Mode] numPoints: ${numPoints}, avgSpacing: ${avgSpacing.toFixed(1)}m, window: ${SMOOTHING_WINDOW}, threshold: ${ELEVATION_THRESHOLD}`);
     
-    // 1. Smooth elevation data
+    // 1. 고도 데이터 스무딩
     const smoothedPoints = [];
     for (let i = 0; i < globalRawPoints.length; i++) {
       let sum = 0;
@@ -402,7 +517,7 @@ function processGPXData() {
       });
     }
     
-    // 2. Compute distance and cumulative elevation gain
+    // 2. 거리 및 임계값(Threshold) 기반 누적 상승고도(ASCENT) 계산
     const points = [];
     let accumulatedDist = 0;
     let totalAscent = 0;
@@ -426,7 +541,7 @@ function processGPXData() {
             totalAscent += eleDiff;
             lastValidEle = ele;
           } else if (eleDiff < -ELEVATION_THRESHOLD) {
-            lastValidEle = ele; // Reset reference on descent
+            lastValidEle = ele; // 내리막 시 기준점 갱신
           }
         }
       }
@@ -446,23 +561,53 @@ function processGPXData() {
     gpxData.totalAscent = totalAscent;
     
   } else {
-    // Road Marathon Mode: standard calculations (no smoothing, no threshold filter)
+    // ===== 로드마라톤 모드 (github.com/zohoda-ui/gpx-road 알고리즘) =====
+    // 1. 이상치 제거: Spike 제거 -> Hampel 필터
+    const cleaned = hampelFilter(removeSpikes(globalRawPoints, 35), 5, 3);
+    
+    // 2. 하이브리드 스무딩: Savitzky-Golay(11) -> 이동평균(MA)
+    const sgSmoothed = savitzkyGolaySmooth(cleaned, 11);
+    const smoothedPoints = [];
+    const MA_WINDOW = Math.min(10, Math.max(2, Math.floor(sgSmoothed.length / 4)));
+    
+    for (let i = 0; i < sgSmoothed.length; i++) {
+      let sum = 0, count = 0;
+      const start = Math.max(0, i - MA_WINDOW);
+      const end = Math.min(sgSmoothed.length - 1, i + MA_WINDOW);
+      for (let j = start; j <= end; j++) {
+        sum += sgSmoothed[j].ele;
+        count++;
+      }
+      smoothedPoints.push({
+        lat: sgSmoothed[i].lat,
+        lon: sgSmoothed[i].lon,
+        ele: sum / count,
+        time: sgSmoothed[i].time
+      });
+    }
+    
+    // 3. 거리 및 Hysteresis 0.5m 기반 실제 D+(ASCENT) 계산
     const points = [];
     let accumulatedDist = 0;
     let totalAscent = 0;
+    let lastEleGain = smoothedPoints[0].ele;
     
-    for (let i = 0; i < globalRawPoints.length; i++) {
-      const pt = globalRawPoints[i];
+    for (let i = 0; i < smoothedPoints.length; i++) {
+      const pt = smoothedPoints[i];
       const lat = pt.lat;
       const lon = pt.lon;
       const ele = pt.ele;
       
       if (i > 0) {
-        const prevPt = globalRawPoints[i-1];
+        const prevPt = smoothedPoints[i-1];
         accumulatedDist += haversineDistance(prevPt.lat, prevPt.lon, lat, lon);
-        const eleGain = ele - prevPt.ele;
-        if (eleGain > 0) {
-          totalAscent += eleGain;
+        
+        const diffGain = ele - lastEleGain;
+        if (diffGain > 0.5) {
+          totalAscent += diffGain;
+          lastEleGain = ele;
+        } else if (diffGain < -0.5) {
+          lastEleGain = ele;
         }
       }
       
@@ -475,6 +620,8 @@ function processGPXData() {
         cumulativeAscent: totalAscent
       });
     }
+    
+    console.log(`[GPX Road Marathon Mode] numPoints: ${points.length}, totalDistance: ${(accumulatedDist/1000).toFixed(2)}km, totalAscent: ${Math.round(totalAscent)}m`);
     
     gpxData.points = points;
     gpxData.totalDistance = accumulatedDist;
