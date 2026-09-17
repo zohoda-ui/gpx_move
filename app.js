@@ -366,7 +366,7 @@ async function processGPXData() {
     }
     
     const processed = result.points || [];
-    const deadband = (profileKey === 'trail') ? 2.0 : 3.0;
+    const deadband = RunruunElevationEngine.PROFILES[profileKey]?.deadbandMeters || 2.0;
     
     // Calculate cumulative distance and deadband ascent for each point
     const points = [];
